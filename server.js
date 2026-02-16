@@ -1,7 +1,8 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
 require("dotenv").config();
+
+const connectDB = require("./lib/db");
 
 // Import routes
 const authRoutes = require("./routes/auth");
@@ -18,8 +19,6 @@ const Page = require("./models/Page");
 const Settings = require("./models/Settings");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/prosite";
 
 // ============ MIDDLEWARE ============
 app.use(
@@ -100,42 +99,24 @@ async function seedDefaults() {
   }
 }
 
-// ============ CONNECT & START ============
-mongoose
-  .connect(MONGO_URI)
-  .then(async () => {
-    console.log("\n🔗 Connected to MongoDB");
-    console.log("📦 Seeding defaults...");
-    await seedDefaults();
+// ============ LOCAL DEV: CONNECT & START ============
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
+  connectDB()
+    .then(async () => {
+      console.log("\n🔗 Connected to MongoDB");
+      console.log("📦 Seeding defaults...");
+      await seedDefaults();
 
-    app.listen(PORT, () => {
-      console.log(`\n🚀 ProSite API running on http://localhost:${PORT}`);
-      console.log("\n📋 Endpoints:");
-      console.log("   POST   /api/auth/register");
-      console.log("   POST   /api/auth/login");
-      console.log("   GET    /api/auth/me");
-      console.log("   GET    /api/themes");
-      console.log("   POST   /api/themes/custom");
-      console.log("   PUT    /api/themes/custom/:id");
-      console.log("   DELETE /api/themes/custom/:id");
-      console.log("   GET    /api/pages");
-      console.log("   POST   /api/pages");
-      console.log("   PUT    /api/pages/:id");
-      console.log("   DELETE /api/pages/:id");
-      console.log("   PUT    /api/pages/:id/reorder");
-      console.log("   GET    /api/content/:pageId");
-      console.log("   PUT    /api/content/:pageId/:compId");
-      console.log("   DELETE /api/content/:pageId/:compId");
-      console.log("   GET    /api/settings");
-      console.log("   PUT    /api/settings");
-      console.log("   GET    /api/billing");
-      console.log("   POST   /api/billing/upgrade");
-      console.log("   GET    /api/health");
-      console.log("\n✨ Ready!\n");
+      app.listen(PORT, () => {
+        console.log(`\n🚀 ProSite API running on http://localhost:${PORT}`);
+        console.log("✨ Ready!\n");
+      });
+    })
+    .catch((err) => {
+      console.error("❌ MongoDB connection failed:", err.message);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error("❌ MongoDB connection failed:", err.message);
-    console.error("   Make sure MongoDB is running on", MONGO_URI);
-    process.exit(1);
-  });
+}
+
+module.exports = app;
