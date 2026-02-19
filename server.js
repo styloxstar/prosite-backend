@@ -21,9 +21,19 @@ const Settings = require("./models/Settings");
 const app = express();
 
 // ============ MIDDLEWARE ============
+const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim());
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
@@ -38,12 +48,40 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/billing", billingRoutes);
 
 // Health check
-app.get("/api/health", (req, res) => {
+app.get("/api/health", async (req, res) => {
+  const mongoose = require("mongoose");
+  const dbState = mongoose.connection.readyState; // 0=disconnected, 1=connected, 2=connecting
+  let userCount = 0;
+  let dbName = "unknown";
+  try {
+    dbName = mongoose.connection.db?.databaseName || "not connected";
+    userCount = await User.countDocuments();
+  } catch (e) {
+    dbName = "error: " + e.message;
+  }
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
+    db: { state: dbState, name: dbName, users: userCount },
   });
+});
+
+// Debug endpoint (REMOVE after fixing)
+app.get("/api/debug-login", async (req, res) => {
+  const bcrypt = require("bcryptjs");
+  const result = { bodyReceived: req.body, bodyType: typeof req.body };
+  try {
+    const user = await User.findOne({ username: "deepak" });
+    result.userFound = !!user;
+    if (user) {
+      result.storedPasswordLength = user.password?.length;
+      result.isBcryptHash = user.password?.startsWith("$2");
+      result.passwordMatch = await bcrypt.compare("deepak@123", user.password);
+    }
+  } catch (e) {
+    result.error = e.message;
+  }
+  res.json(result);
 });
 
 // ============ ERROR HANDLER ============
@@ -120,3 +158,4 @@ if (require.main === module) {
 }
 
 module.exports = app;
+module.exports.seedDefaults = seedDefaults;

@@ -8,14 +8,14 @@ const PLANS = [
   {
     id: "starter",
     name: "Starter",
-    price: 9,
+    prices: { USD: 9, INR: 499, EUR: 8, GBP: 7 },
     pages: 3,
     features: ["3 Pages", "6 Free Themes", "Basic Components", "Email Support"],
   },
   {
     id: "pro",
     name: "Professional",
-    price: 29,
+    prices: { USD: 29, INR: 1499, EUR: 27, GBP: 23 },
     pages: 8,
     popular: true,
     features: [
@@ -30,7 +30,7 @@ const PLANS = [
   {
     id: "enterprise",
     name: "Enterprise",
-    price: 79,
+    prices: { USD: 79, INR: 3999, EUR: 72, GBP: 62 },
     pages: 25,
     features: [
       "Unlimited Pages",
@@ -62,7 +62,7 @@ router.get("/", authenticate, (req, res) => {
 // POST /api/billing/upgrade
 router.post("/upgrade", authenticate, async (req, res) => {
   try {
-    const { planId, cardLast4, cardBrand } = req.body;
+    const { planId, cardLast4, cardBrand, currency } = req.body;
 
     if (!PLAN_CONFIG[planId]) {
       return res.status(400).json({ error: "Invalid plan" });
