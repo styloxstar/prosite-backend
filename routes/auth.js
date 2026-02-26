@@ -38,14 +38,14 @@ router.post("/register", async (req, res) => {
     // Create default settings
     await Settings.create({ userId: user._id });
 
-    // Create default pages for new user
+    // Create empty default pages for new user
     await Page.insertMany([
       {
         userId: user._id,
         pageId: "home",
         name: "Home",
         slug: "home",
-        components: ["navbar", "hero", "features", "stats", "footer"],
+        components: [],
         order: 0,
       },
       {
@@ -53,7 +53,7 @@ router.post("/register", async (req, res) => {
         pageId: "about",
         name: "About",
         slug: "about",
-        components: ["navbar", "gallery", "footer"],
+        components: [],
         order: 1,
       },
     ]);
