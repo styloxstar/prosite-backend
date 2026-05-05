@@ -131,4 +131,80 @@ router.get("/me", authenticate, (req, res) => {
   });
 });
 
+// PUT /api/auth/profile — update name, email, username, optional new password
+router.put("/profile", authenticate, async (req, res) => {
+  try {
+    const { name, email, username, currentPassword, newPassword } = req.body;
+    const update = { updatedAt: Date.now() };
+    const errors = [];
+
+    // --- name ---
+    if (name !== undefined) {
+      const trimmed = name.trim();
+      if (!trimmed) errors.push("Name cannot be empty");
+      else update.name = trimmed;
+    }
+
+    // --- email ---
+    if (email !== undefined) {
+      const trimmed = email.trim().toLowerCase();
+      if (trimmed) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(trimmed)) {
+          errors.push("Invalid email address");
+        } else {
+          const taken = await User.findOne({ email: trimmed, _id: { $ne: req.user._id } });
+          if (taken) errors.push("Email is already in use by another account");
+          else update.email = trimmed;
+        }
+      } else {
+        update.email = "";
+      }
+    }
+
+    // --- username ---
+    if (username !== undefined) {
+      const trimmed = username.trim().toLowerCase();
+      if (!trimmed) errors.push("Username cannot be empty");
+      else if (!/^[a-z0-9_]{3,30}$/.test(trimmed)) errors.push("Username must be 3-30 characters: letters, numbers, underscores only");
+      else if (trimmed !== req.user.username) {
+        const taken = await User.findOne({ username: trimmed });
+        if (taken) errors.push("Username is already taken");
+        else update.username = trimmed;
+      }
+    }
+
+    // --- password change ---
+    if (newPassword) {
+      if (!currentPassword) return res.status(400).json({ error: "Current password is required to set a new one" });
+      const match = await req.user.comparePassword(currentPassword);
+      if (!match) return res.status(400).json({ error: "Current password is incorrect" });
+      if (newPassword.length < 6) errors.push("New password must be at least 6 characters");
+      else update.password = newPassword;
+    }
+
+    if (errors.length) return res.status(400).json({ error: errors.join(". ") });
+
+    const user = await User.findById(req.user._id);
+    Object.assign(user, update);
+    await user.save(); // triggers password hash hook
+
+    res.json({
+      user: {
+        id: user._id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        plan: user.plan,
+        isFullAccess: user.username === "deepak",
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error("Profile update error:", err);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
 module.exports = router;

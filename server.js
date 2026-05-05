@@ -11,6 +11,8 @@ const pageRoutes = require("./routes/pages");
 const contentRoutes = require("./routes/content");
 const settingsRoutes = require("./routes/settings");
 const billingRoutes = require("./routes/billing");
+const emailLogsRoutes = require("./routes/emailLogs");
+const adminRoutes = require("./routes/admin");
 
 // Import models for seeding
 const User = require("./models/User");
@@ -46,6 +48,8 @@ app.use("/api/pages", pageRoutes);
 app.use("/api/content", contentRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/billing", billingRoutes);
+app.use("/api/email-logs", emailLogsRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {
@@ -127,6 +131,24 @@ async function seedDefaults() {
       ];
       await Theme.insertMany(themes);
       console.log("  ✅ 24 default themes seeded (12 light + 12 dark)");
+    }
+
+    // Seed default admin user (admin/admin)
+    const adminUser = await User.findOne({ username: "admin" });
+    if (!adminUser) {
+      const a = await User.create({
+        username: "admin",
+        password: "admin",
+        name: "Admin",
+        email: "",
+        role: "admin",
+        plan: { id: "enterprise", maxPages: 25, customThemes: true },
+      });
+      await Settings.create({ userId: a._id, activeTheme: "dark-midnight" });
+      await Page.insertMany([
+        { userId: a._id, pageId: "home", name: "Home", slug: "home", components: [], order: 0 },
+      ]);
+      console.log("  ✅ Admin user seeded (admin/admin)");
     }
 
     // Seed deepak user with enterprise plan

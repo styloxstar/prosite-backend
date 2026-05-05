@@ -18,7 +18,7 @@ const invoiceSchema = new mongoose.Schema({
   planId: {
     type: String,
     required: true,
-    enum: ["starter", "pro", "enterprise"],
+    enum: ["free-trial", "starter", "pro", "enterprise"],
   },
   planName: {
     type: String,

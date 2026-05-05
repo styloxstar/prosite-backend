@@ -50,12 +50,21 @@ const PLANS = [
       "API Access",
     ],
   },
+  {
+    id: "free-trial",
+    name: "Free Trial",
+    prices: { USD: 0, INR: 0, EUR: 0, GBP: 0 },
+    pages: 3,
+    trialDays: 14,
+    features: ["3 Pages", "6 Free Themes", "Basic Components", "14-Day Free Trial", "No Credit Card Needed"],
+  },
 ];
 
 const PLAN_CONFIG = {
   starter: { maxPages: 3, customThemes: false },
   pro: { maxPages: 8, customThemes: true },
   enterprise: { maxPages: 25, customThemes: true },
+  "free-trial": { maxPages: 3, customThemes: false },
 };
 
 // In-memory payment orders (use DB in production)
@@ -306,6 +315,104 @@ router.post("/upgrade", authenticate, async (req, res) => {
   } catch (err) {
     console.error("Upgrade error:", err);
     res.status(500).json({ error: "Failed to process upgrade" });
+  }
+});
+
+// POST /api/billing/activate-free — zero-price free trial activation via email link
+router.post("/activate-free", authenticate, async (req, res) => {
+  try {
+    const jwt = require("jsonwebtoken");
+    const { planId } = req.body;
+    if (planId !== "free-trial") return res.status(400).json({ error: "Invalid plan for free activation" });
+
+    if (!req.user.email) {
+      return res.status(400).json({ error: "No email address on your account. Please update your profile with an email first." });
+    }
+
+    const trialDays = 14;
+    const expiresAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+    const activationToken = jwt.sign(
+      { userId: req.user._id.toString(), planId, expiresAt: expiresAt.toISOString() },
+      process.env.JWT_SECRET,
+      { expiresIn: "72h" }
+    );
+
+    const activationLink = `${process.env.CLIENT_URL || "http://localhost:5174"}?activate=${activationToken}`;
+    console.log(`[FREE TRIAL] Activation link for ${req.user.email}: ${activationLink}`);
+
+    const { sendActivationEmail } = require("../utils/email");
+    try {
+      await sendActivationEmail(req.user, activationLink, trialDays);
+      res.json({ success: true, message: `Activation link sent to ${req.user.email}` });
+    } catch (emailErr) {
+      console.error("Activation email failed:", emailErr.message);
+      res.status(500).json({ error: "Failed to send activation email. Check server email configuration." });
+    }
+  } catch (err) {
+    console.error("Activate-free error:", err);
+    res.status(500).json({ error: "Failed to generate activation link" });
+  }
+});
+
+// GET /api/billing/activate/:token — validates token from email link and activates plan
+router.get("/activate/:token", async (req, res) => {
+  try {
+    const jwt = require("jsonwebtoken");
+    const decoded = jwt.verify(req.params.token, process.env.JWT_SECRET);
+    const { userId, planId } = decoded;
+
+    if (planId !== "free-trial") return res.status(400).json({ error: "Invalid activation token" });
+
+    const trialDays = 14;
+    const expiresAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        plan: { id: "starter", maxPages: 3, customThemes: false, expiresAt },
+        role: "starter",
+        updatedAt: Date.now(),
+      },
+      { new: true }
+    ).select("-password");
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Record as a free invoice
+    try {
+      const invoiceNumber = await generateInvoiceNumber();
+      await Invoice.create({
+        invoiceNumber,
+        userId: user._id,
+        orderId: "FREE-" + Date.now(),
+        planId: "free-trial",
+        planName: "Free Trial (14 days)",
+        amount: 0,
+        currency: "INR",
+        paymentMethod: "free",
+        status: "paid",
+        userEmail: user.email || "",
+        userName: user.name || user.username,
+      });
+    } catch (invErr) {
+      console.error("Free trial invoice error:", invErr.message);
+    }
+
+    // Return a fresh auth token so the frontend can log the user in directly
+    const authToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+
+    res.json({
+      success: true,
+      message: "Free trial activated!",
+      token: authToken,
+      user: { id: user._id, username: user.username, name: user.name, role: user.role, plan: user.plan, email: user.email },
+    });
+  } catch (err) {
+    if (err.name === "TokenExpiredError") {
+      return res.status(400).json({ error: "Activation link has expired. Please request a new one." });
+    }
+    console.error("Activate error:", err);
+    res.status(400).json({ error: "Invalid or expired activation link" });
   }
 });
 
