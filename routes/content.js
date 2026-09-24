@@ -1,133 +1,90 @@
+/**
+ * Per-component content storage (backs `api.content.*` in the frontend).
+ *
+ * [SECURITY FIX 2026-09-23] This file used to be a verbatim copy of routes/pages.js, mounted at
+ * /api/content. That exposed a second, unintended set of page create/update/delete endpoints, while
+ * the content API the frontend actually calls (GET /:pageId, PUT/DELETE /:pageId/:componentId) did not
+ * exist — and `PUT /content/<page>/reorder` silently hit the page-reorder handler instead.
+ * It now implements exactly the documented content API, scoped to the authenticated user and
+ * with a size cap on stored content.
+ */
 const express = require("express");
-const Page = require("../models/Page");
 const ComponentContent = require("../models/ComponentContent");
 const { authenticate } = require("../middleware/auth");
+const { LIMITS, isStringOfLength } = require("../lib/validators");
 
 const router = express.Router();
 
-// GET /api/pages - Get all pages for user
-router.get("/", authenticate, async (req, res) => {
+const MAX_CONTENT_BYTES = 2 * 1024 * 1024; // images are stored as data URLs, so allow ~2 MB per component
+const MAX_PAGE_ID_LENGTH = 128;
+
+function isValidId(value, maxLength) {
+  return isStringOfLength(value, 1, maxLength);
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Rejects bad ids up-front so every handler below can trust req.params. */
+function validateParams(req, res, next) {
+  const { pageId, componentId } = req.params;
+  if (!isValidId(pageId, MAX_PAGE_ID_LENGTH)) {
+    return res.status(400).json({ error: "Invalid page id" });
+  }
+  if (componentId !== undefined && !isValidId(componentId, LIMITS.COMPONENT_ID)) {
+    return res.status(400).json({ error: "Invalid component id" });
+  }
+  next();
+}
+
+router.use(authenticate);
+
+// GET /api/content/:pageId — all saved component contents for one of the user's pages
+router.get("/:pageId", validateParams, async (req, res) => {
   try {
-    const pages = await Page.find({ userId: req.user._id }).sort("order");
-    res.json({ pages });
+    const docs = await ComponentContent.find({ userId: req.user._id, pageId: req.params.pageId }).lean();
+    const contents = Object.fromEntries(docs.map((doc) => [doc.componentId, doc.content]));
+    res.json({ contents });
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch pages" });
+    res.status(500).json({ error: "Failed to fetch content" });
   }
 });
 
-// POST /api/pages - Create new page
-router.post("/", authenticate, async (req, res) => {
+// PUT /api/content/:pageId/:componentId — save one component's content
+router.put("/:pageId/:componentId", validateParams, async (req, res) => {
   try {
-    const pageCount = await Page.countDocuments({ userId: req.user._id });
-
-    if (pageCount >= req.user.plan.maxPages && req.user.role !== "admin") {
-      return res.status(403).json({
-        error: `Maximum ${req.user.plan.maxPages} pages on your plan. Please upgrade.`,
-      });
+    const { content } = req.body;
+    if (!isPlainObject(content)) {
+      return res.status(400).json({ error: "Content must be an object" });
+    }
+    if (Buffer.byteLength(JSON.stringify(content)) > MAX_CONTENT_BYTES) {
+      return res.status(413).json({ error: "Content is too large" });
     }
 
-    const { name, components } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: "Page name is required" });
-    }
-
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-
-    const pageId = `${slug}-${Date.now()}`;
-
-    const page = await Page.create({
-      userId: req.user._id,
-      pageId,
-      name,
-      slug,
-      components: components || ["navbar", "hero", "footer"],
-      order: pageCount,
-    });
-
-    res.status(201).json({ page });
-  } catch (err) {
-    console.error("Create page error:", err);
-    res.status(500).json({ error: "Failed to create page" });
-  }
-});
-
-// PUT /api/pages/:pageId - Update page
-router.put("/:pageId", authenticate, async (req, res) => {
-  try {
-    const page = await Page.findOne({
-      pageId: req.params.pageId,
-      userId: req.user._id,
-    });
-
-    if (!page) {
-      return res.status(404).json({ error: "Page not found" });
-    }
-
-    const { name, components, isPublished, order } = req.body;
-
-    if (name !== undefined) page.name = name;
-    if (components !== undefined) page.components = components;
-    if (isPublished !== undefined) page.isPublished = isPublished;
-    if (order !== undefined) page.order = order;
-    page.updatedAt = Date.now();
-
-    await page.save();
-    res.json({ page });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update page" });
-  }
-});
-
-// DELETE /api/pages/:pageId
-router.delete("/:pageId", authenticate, async (req, res) => {
-  try {
-    const result = await Page.deleteOne({
-      pageId: req.params.pageId,
-      userId: req.user._id,
-    });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: "Page not found" });
-    }
-
-    // Clean up component contents for this page
-    await ComponentContent.deleteMany({
-      userId: req.user._id,
-      pageId: req.params.pageId,
-    });
-
-    res.json({ message: "Page deleted" });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to delete page" });
-  }
-});
-
-// PUT /api/pages/:pageId/reorder - Reorder components
-router.put("/:pageId/reorder", authenticate, async (req, res) => {
-  try {
-    const { components } = req.body;
-
-    if (!Array.isArray(components)) {
-      return res.status(400).json({ error: "Components array is required" });
-    }
-
-    const page = await Page.findOneAndUpdate(
-      { pageId: req.params.pageId, userId: req.user._id },
-      { components, updatedAt: Date.now() },
-      { new: true }
+    const doc = await ComponentContent.findOneAndUpdate(
+      { userId: req.user._id, pageId: req.params.pageId, componentId: req.params.componentId },
+      { content, updatedAt: Date.now() },
+      { upsert: true, new: true }
     );
-
-    if (!page) {
-      return res.status(404).json({ error: "Page not found" });
-    }
-
-    res.json({ page });
+    res.json({ content: doc.content });
   } catch (err) {
-    res.status(500).json({ error: "Failed to reorder components" });
+    console.error("Save content error:", err);
+    res.status(500).json({ error: "Failed to save content" });
+  }
+});
+
+// DELETE /api/content/:pageId/:componentId — reset a component back to its defaults
+router.delete("/:pageId/:componentId", validateParams, async (req, res) => {
+  try {
+    await ComponentContent.deleteOne({
+      userId: req.user._id,
+      pageId: req.params.pageId,
+      componentId: req.params.componentId,
+    });
+    res.json({ message: "Content reset" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to reset content" });
   }
 });
 

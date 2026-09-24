@@ -2,8 +2,35 @@ const express = require("express");
 const Page = require("../models/Page");
 const ComponentContent = require("../models/ComponentContent");
 const { authenticate } = require("../middleware/auth");
+const { LIMITS, isStringOfLength } = require("../lib/validators");
 
 const router = express.Router();
+
+const DEFAULT_COMPONENTS = ["navbar", "hero", "footer"];
+
+/**
+ * [SECURITY FIX 2026-09-23] `components`, `name`, `order` and `isPublished` were stored exactly as
+ * sent. Arbitrary nested objects/huge arrays could be written into the DB (storage abuse) and later
+ * rendered/exported by the builder. Only a bounded list of short component-id strings is accepted now.
+ */
+function isValidComponentList(components) {
+  return (
+    Array.isArray(components) &&
+    components.length <= LIMITS.COMPONENTS_PER_PAGE &&
+    components.every((id) => isStringOfLength(id, 1, LIMITS.COMPONENT_ID))
+  );
+}
+
+function isValidPageName(name) {
+  return isStringOfLength(name, 1, LIMITS.PAGE_NAME);
+}
+
+function toSlug(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
 
 // GET /api/pages - Get all pages for user
 router.get("/", authenticate, async (req, res) => {
@@ -28,23 +55,23 @@ router.post("/", authenticate, async (req, res) => {
 
     const { name, components } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ error: "Page name is required" });
+    if (!isValidPageName(name)) {
+      return res.status(400).json({ error: `Page name is required (max ${LIMITS.PAGE_NAME} characters)` });
+    }
+    if (components !== undefined && !isValidComponentList(components)) {
+      return res.status(400).json({ error: "Invalid components list" });
     }
 
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-
+    const trimmedName = name.trim();
+    const slug = toSlug(trimmedName);
     const pageId = `${slug}-${Date.now()}`;
 
     const page = await Page.create({
       userId: req.user._id,
       pageId,
-      name,
+      name: trimmedName,
       slug,
-      components: components || ["navbar", "hero", "footer"],
+      components: components || DEFAULT_COMPONENTS,
       order: pageCount,
     });
 
@@ -58,6 +85,7 @@ router.post("/", authenticate, async (req, res) => {
 // PUT /api/pages/:pageId - Update page
 router.put("/:pageId", authenticate, async (req, res) => {
   try {
+    // Ownership is enforced by filtering on userId — a user can never touch another user's page.
     const page = await Page.findOne({
       pageId: req.params.pageId,
       userId: req.user._id,
@@ -69,7 +97,20 @@ router.put("/:pageId", authenticate, async (req, res) => {
 
     const { name, components, isPublished, order } = req.body;
 
-    if (name !== undefined) page.name = name;
+    if (name !== undefined && !isValidPageName(name)) {
+      return res.status(400).json({ error: `Page name must be 1-${LIMITS.PAGE_NAME} characters` });
+    }
+    if (components !== undefined && !isValidComponentList(components)) {
+      return res.status(400).json({ error: "Invalid components list" });
+    }
+    if (isPublished !== undefined && typeof isPublished !== "boolean") {
+      return res.status(400).json({ error: "isPublished must be true or false" });
+    }
+    if (order !== undefined && !Number.isInteger(order)) {
+      return res.status(400).json({ error: "order must be an integer" });
+    }
+
+    if (name !== undefined) page.name = name.trim();
     if (components !== undefined) page.components = components;
     if (isPublished !== undefined) page.isPublished = isPublished;
     if (order !== undefined) page.order = order;
@@ -111,7 +152,7 @@ router.put("/:pageId/reorder", authenticate, async (req, res) => {
   try {
     const { components } = req.body;
 
-    if (!Array.isArray(components)) {
+    if (!isValidComponentList(components)) {
       return res.status(400).json({ error: "Components array is required" });
     }
 

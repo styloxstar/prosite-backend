@@ -1,5 +1,6 @@
 const nodemailer = require("nodemailer");
 const EmailLog = require("../models/EmailLog");
+const { escapeHtml } = require("../lib/validators");
 
 const CURRENCY_SYMBOLS = { INR: "\u20B9", USD: "$", EUR: "\u20AC", GBP: "\u00A3" };
 
@@ -21,9 +22,27 @@ function createTransporter() {
   });
 }
 
-function buildPaymentEmailHTML(invoice) {
-  const symbol = CURRENCY_SYMBOLS[invoice.currency] || "\u20B9";
-  const date = new Date(invoice.createdAt).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
+/**
+ * [SECURITY FIX 2026-09-23] HTML injection in outgoing e-mail: user-controlled fields (display name,
+ * UPI transaction ID, etc.) were interpolated raw into the HTML. Anyone could set their name to
+ * `<a href="https://evil">Verify your account</a>` and have a convincing phishing link delivered from
+ * the official ProSite Gmail account. Every dynamic value is now HTML-escaped first.
+ */
+function escapeInvoiceForHtml(invoice) {
+  return {
+    invoiceNumber: escapeHtml(invoice.invoiceNumber),
+    userName: escapeHtml(invoice.userName),
+    planName: escapeHtml(invoice.planName),
+    amount: escapeHtml(invoice.amount),
+    upiTransactionId: escapeHtml(invoice.upiTransactionId || "N/A"),
+    orderId: escapeHtml(invoice.orderId),
+  };
+}
+
+function buildPaymentEmailHTML(rawInvoice) {
+  const invoice = escapeInvoiceForHtml(rawInvoice);
+  const symbol = CURRENCY_SYMBOLS[rawInvoice.currency] || "\u20B9";
+  const date = new Date(rawInvoice.createdAt).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
   const year = new Date().getFullYear();
 
   return `<!DOCTYPE html>
@@ -93,7 +112,7 @@ function buildPaymentEmailHTML(invoice) {
           </tr>
           <tr>
             <td style="padding:4px 0;font-size:13px;color:#6b7280;">Transaction ID</td>
-            <td style="padding:4px 0;font-size:13px;color:#374151;font-weight:600;">${invoice.upiTransactionId || "N/A"}</td>
+            <td style="padding:4px 0;font-size:13px;color:#374151;font-weight:600;">${invoice.upiTransactionId}</td>
           </tr>
           <tr>
             <td style="padding:4px 0;font-size:13px;color:#6b7280;">Order ID</td>
@@ -133,7 +152,7 @@ async function sendPaymentConfirmationEmail(invoice, userEmail) {
   const html = buildPaymentEmailHTML(invoice);
   try {
     await transporter.sendMail({ from: `"ProSite" <${process.env.EMAIL_USER}>`, to: userEmail, subject, html });
-    console.log(`Payment confirmation email sent to ${userEmail} for ${invoice.invoiceNumber}`);
+    console.log(`Payment confirmation email sent for ${invoice.invoiceNumber}`);
     await saveEmailLog({ userId: invoice.userId, type: "payment", to: userEmail, subject, status: "sent", invoiceId: invoice._id });
   } catch (err) {
     await saveEmailLog({ userId: invoice.userId, type: "payment", to: userEmail, subject, status: "failed", errorMessage: err.message, invoiceId: invoice._id });
@@ -141,8 +160,10 @@ async function sendPaymentConfirmationEmail(invoice, userEmail) {
   }
 }
 
-function buildActivationEmailHTML(user, activationLink, trialDays) {
-  const name = user.name || user.username || "there";
+function buildActivationEmailHTML(user, rawActivationLink, trialDays) {
+  // [SECURITY FIX 2026-09-23] Escaped: the display name is user-controlled (see escapeInvoiceForHtml).
+  const name = escapeHtml(user.name || user.username || "there");
+  const activationLink = escapeHtml(rawActivationLink);
   const invoiceNum = "FREE-" + Date.now().toString().slice(-8);
   const date = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
   const expiry = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
@@ -259,7 +280,7 @@ async function sendActivationEmail(user, activationLink, trialDays) {
     throw new Error("EMAIL_USER / EMAIL_PASS not configured in .env");
   }
   const toEmail = (user.email || "").trim();
-  console.log(`[EMAIL] sendActivationEmail → to="${toEmail}" from="${process.env.EMAIL_USER}"`);
+  // [SECURITY FIX 2026-09-23] Stopped logging recipient and sender addresses (PII in server logs).
   if (!toEmail) {
     throw new Error("User has no email address");
   }
@@ -268,7 +289,7 @@ async function sendActivationEmail(user, activationLink, trialDays) {
   const html = buildActivationEmailHTML(user, activationLink, trialDays);
   try {
     await transporter.sendMail({ from: `"ProSite" <${process.env.EMAIL_USER}>`, to: toEmail, subject, html });
-    console.log(`[EMAIL] Activation email sent to ${toEmail}`);
+    console.log(`[EMAIL] Activation email sent for user ${user._id}`);
     await saveEmailLog({ userId: user._id, type: "activation", to: toEmail, subject, status: "sent" });
   } catch (err) {
     await saveEmailLog({ userId: user._id, type: "activation", to: toEmail, subject, status: "failed", errorMessage: err.message });
