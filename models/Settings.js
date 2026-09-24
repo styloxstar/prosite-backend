@@ -19,6 +19,11 @@ const settingsSchema = new mongoose.Schema({
     type: String,
     default: "home",
   },
+  // Site font chosen on the Themes page (a Google Fonts family name).
+  font: {
+    type: String,
+    default: "Inter",
+  },
   updatedAt: {
     type: Date,
     default: Date.now,
