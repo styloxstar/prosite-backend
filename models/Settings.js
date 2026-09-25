@@ -33,6 +33,13 @@ const settingsSchema = new mongoose.Schema({
     surface: { type: String, default: "glass" },
     effect: { type: String, default: "aurora" },
     motion: { type: String, default: "subtle" },
+    backdrop: { type: String, default: "auto" },
+    texture: { type: String, default: "auto" },
+    frame: { type: String, default: "flow" },
+    reveal: { type: String, default: "rise" },
+    cascade: { type: String, default: "on" },
+    headline: { type: String, default: "gradient" },
+    hover: { type: String, default: "lift" },
   },
   updatedAt: {
     type: Date,

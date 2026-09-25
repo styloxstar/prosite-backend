@@ -16,6 +16,15 @@ const DESIGN_VALUES = {
   surface: ["glass", "solid", "outline"],
   effect: ["aurora", "orbs", "grid", "mesh", "none"],
   motion: ["subtle", "lively", "none"],
+  // page backdrop: "auto" (the theme's own) or one of the ambient effects
+  backdrop: ["auto", "none", "constellation", "aurora", "nebula", "starfield", "mesh", "fog", "spotlight", "sweep", "neonGrid", "goldDust",
+    "embers", "fireflies", "bokeh", "fizz", "dotField", "waves", "sunrise", "clouds", "snow", "petals", "leaves", "pollen", "dunes", "reef"],
+  texture: ["auto", "none", "grain", "grid", "dots", "scanlines", "carbon", "brushed"],
+  frame: ["flow", "panels", "classic"],
+  reveal: ["rise", "fade", "zoom", "blur", "slide", "none"],
+  cascade: ["on", "off"],
+  headline: ["gradient", "rise", "glow", "ink"],
+  hover: ["lift", "tilt", "glow", "none"],
 };
 
 /** Validated copy of a design object, or null when anything in it is unknown or malformed. */
