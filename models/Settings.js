@@ -24,6 +24,16 @@ const settingsSchema = new mongoose.Schema({
     type: String,
     default: "Inter",
   },
+  // Site style chosen in the builder's Design panel (see routes/settings.js for the allowed values).
+  design: {
+    headingFont: { type: String, default: "" },
+    radius: { type: String, default: "soft" },
+    spacing: { type: String, default: "comfortable" },
+    buttons: { type: String, default: "pill" },
+    surface: { type: String, default: "glass" },
+    effect: { type: String, default: "aurora" },
+    motion: { type: String, default: "subtle" },
+  },
   updatedAt: {
     type: Date,
     default: Date.now,
