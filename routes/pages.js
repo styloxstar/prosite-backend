@@ -8,6 +8,26 @@ const router = express.Router();
 
 const DEFAULT_COMPONENTS = ["navbar", "hero", "footer"];
 
+const SEO_LIMITS = { title: 120, description: 300, image: 2048, favicon: 2048 };
+const HTTPS_URL = /^https:\/\/[^\s<>"']+$/i;
+
+/**
+ * Validated copy of a page's SEO settings, or null if anything is malformed. The share image must be
+ * an https URL; the favicon an emoji (short text without markup) or an https URL.
+ */
+function parseSeo(seo) {
+  if (!seo || typeof seo !== "object" || Array.isArray(seo)) return null;
+  const out = {};
+  for (const [key, value] of Object.entries(seo)) {
+    if (!(key in SEO_LIMITS) || typeof value !== "string" || value.length > SEO_LIMITS[key]) return null;
+    const v = value.trim();
+    if (key === "image" && v && !HTTPS_URL.test(v)) return null;
+    if (key === "favicon" && v && !HTTPS_URL.test(v) && (v.length > 8 || /[<>&"'\s]/.test(v))) return null;
+    out[key] = v;
+  }
+  return out;
+}
+
 /**
  * [SECURITY FIX 2026-09-23] `components`, `name`, `order` and `isPublished` were stored exactly as
  * sent. Arbitrary nested objects/huge arrays could be written into the DB (storage abuse) and later
@@ -95,7 +115,7 @@ router.put("/:pageId", authenticate, async (req, res) => {
       return res.status(404).json({ error: "Page not found" });
     }
 
-    const { name, components, isPublished, order } = req.body;
+    const { name, components, isPublished, order, seo } = req.body;
 
     if (name !== undefined && !isValidPageName(name)) {
       return res.status(400).json({ error: `Page name must be 1-${LIMITS.PAGE_NAME} characters` });
@@ -109,11 +129,16 @@ router.put("/:pageId", authenticate, async (req, res) => {
     if (order !== undefined && !Number.isInteger(order)) {
       return res.status(400).json({ error: "order must be an integer" });
     }
+    const seoUpdate = seo !== undefined ? parseSeo(seo) : undefined;
+    if (seo !== undefined && !seoUpdate) {
+      return res.status(400).json({ error: "Invalid SEO settings" });
+    }
 
     if (name !== undefined) page.name = name.trim();
     if (components !== undefined) page.components = components;
     if (isPublished !== undefined) page.isPublished = isPublished;
     if (order !== undefined) page.order = order;
+    if (seoUpdate) Object.entries(seoUpdate).forEach(([key, value]) => page.set("seo." + key, value));
     page.updatedAt = Date.now();
 
     await page.save();

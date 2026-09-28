@@ -41,6 +41,15 @@ const settingsSchema = new mongoose.Schema({
     headline: { type: String, default: "gradient" },
     hover: { type: String, default: "lift" },
   },
+  // Site-wide extras for exported sites (validated in routes/settings.js).
+  site: {
+    progress: { type: Boolean, default: false },
+    backToTop: { type: Boolean, default: true },
+    cursorGlow: { type: Boolean, default: false },
+    cookie: { type: Boolean, default: false },
+    cookieText: { type: String, default: "We use cookies to give you the best experience on our site." },
+    analyticsId: { type: String, default: "" },
+  },
   updatedAt: {
     type: Date,
     default: Date.now,
