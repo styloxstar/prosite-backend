@@ -4,7 +4,8 @@ const EmailLog = require("../models/EmailLog");
 // UPI transaction ID, etc.) were interpolated raw into the HTML, so anyone could set their name to
 // `<a href="https://evil">Verify your account</a>` and have a phishing link delivered from the official
 // ProSite account. The templates HTML-escape every dynamic value (see email-templates.js).
-const { paymentReceiptEmail, trialActivationEmail } = require("./email-templates");
+const { paymentReceiptEmail, trialActivationEmail, passwordResetEmail, passwordChangedEmail } = require("./email-templates");
+const { IS_PRODUCTION } = require("../lib/config");
 
 async function saveEmailLog({ userId, type, to, subject, status, errorMessage, invoiceId }) {
   try {
@@ -66,4 +67,36 @@ async function sendActivationEmail(user, activationLink, trialDays) {
   }
 }
 
-module.exports = { sendPaymentConfirmationEmail, sendActivationEmail };
+const isEmailConfigured = () => Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+
+/** Sends one account e-mail and records the outcome in EmailLog. */
+async function sendAccountEmail(user, type, { subject, html, text }) {
+  const toEmail = (user.email || "").trim();
+  if (!toEmail) throw new Error("User has no email address");
+  try {
+    await createTransporter().sendMail({ from: `"ProSite" <${process.env.EMAIL_USER}>`, to: toEmail, subject, html, text });
+    await saveEmailLog({ userId: user._id, type, to: toEmail, subject, status: "sent" });
+  } catch (err) {
+    await saveEmailLog({ userId: user._id, type, to: toEmail, subject, status: "failed", errorMessage: err.message });
+    throw err;
+  }
+}
+
+async function sendPasswordResetEmail(user, resetLink, minutes) {
+  if (!isEmailConfigured()) {
+    // Local development without SMTP: print the link so the flow can still be tried. Never in
+    // production, where the link is as good as the password and must only reach the inbox.
+    if (!IS_PRODUCTION) console.warn(`[DEV] Email not configured. Password reset link for ${user.username}: ${resetLink}`);
+    else console.error("[EMAIL] Password reset requested but EMAIL_USER / EMAIL_PASS are not configured");
+    return;
+  }
+  await sendAccountEmail(user, "password-reset", passwordResetEmail(user, resetLink, minutes));
+  console.log(`[EMAIL] Password reset email sent for user ${user._id}`);
+}
+
+async function sendPasswordChangedEmail(user) {
+  if (!isEmailConfigured() || !user.email) return;
+  await sendAccountEmail(user, "security", passwordChangedEmail(user));
+}
+
+module.exports = { sendPaymentConfirmationEmail, sendActivationEmail, sendPasswordResetEmail, sendPasswordChangedEmail };

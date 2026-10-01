@@ -4,8 +4,10 @@ const User = require("../models/User");
 const Settings = require("../models/Settings");
 const Page = require("../models/Page");
 const { authenticate } = require("../middleware/auth");
-const { loginLimiter, registerLimiter } = require("../middleware/rateLimit");
-const { signAuthToken } = require("../lib/tokens");
+const { loginLimiter, registerLimiter, forgotPasswordLimiter, forgotPasswordTargetLimiter, resetPasswordLimiter } = require("../middleware/rateLimit");
+const { signAuthToken, signPasswordResetToken, verifyPasswordResetToken, passwordFingerprint, PASSWORD_RESET_TTL_MINUTES } = require("../lib/tokens");
+const { sendPasswordResetEmail, sendPasswordChangedEmail } = require("../utils/email");
+const config = require("../lib/config");
 const {
   USERNAME_REGEX,
   LIMITS,
@@ -134,6 +136,88 @@ router.post("/login", loginLimiter, async (req, res) => {
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// ── Forgot / reset password ────────────────────────────────────────────────────────────────────────
+// Same answer whether or not an account matches, so the form can't be used to discover accounts.
+const RESET_REQUESTED_MESSAGE = "If an account matches, we've sent a link to reset the password to its email address.";
+const RESET_LINK_INVALID = "This reset link is invalid or has expired. Please request a new one.";
+
+/** "deepak@example.com" → "de••••@example.com" (shown on the reset page so users know which account). */
+function maskEmail(email) {
+  const [local, domain] = String(email || "").split("@");
+  if (!domain) return "";
+  return `${local.slice(0, 2)}${"•".repeat(Math.max(2, Math.min(6, local.length - 2)))}@${domain}`;
+}
+
+/** The user a reset token belongs to, or null when the token is bad, expired or already used. */
+async function userForResetToken(token) {
+  if (!isString(token) || token.length > 2048) return null;
+  let decoded;
+  try { decoded = verifyPasswordResetToken(token); } catch { return null; }
+  const user = await User.findById(decoded.userId);
+  // Single use: the fingerprint changes as soon as the password does.
+  if (!user || decoded.pf !== passwordFingerprint(user)) return null;
+  return user;
+}
+
+// POST /api/auth/forgot-password  { identifier: email or username }
+router.post("/forgot-password", forgotPasswordLimiter, forgotPasswordTargetLimiter, async (req, res) => {
+  try {
+    const { identifier } = req.body;
+    if (!isString(identifier) || !identifier.trim() || identifier.length > 254) {
+      return res.status(400).json({ error: "Enter the email address or username of your account" });
+    }
+    const id = identifier.trim().toLowerCase();
+    const user = await User.findOne(id.includes("@") ? { email: id } : { username: id });
+
+    if (user?.email) {
+      const token = signPasswordResetToken(user);
+      const resetLink = `${config.PRIMARY_CLIENT_URL}?reset=${encodeURIComponent(token)}`;
+      // Sent in the background: waiting for SMTP would make "account exists" measurably slower.
+      sendPasswordResetEmail(user, resetLink, PASSWORD_RESET_TTL_MINUTES).catch((err) => {
+        console.error("[EMAIL] Password reset email failed:", err.message);
+      });
+    }
+    res.json({ message: RESET_REQUESTED_MESSAGE });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    res.status(500).json({ error: "Couldn't process the request. Please try again." });
+  }
+});
+
+// POST /api/auth/reset-password/check  { token } → whether the link still works (and for whom)
+router.post("/reset-password/check", resetPasswordLimiter, async (req, res) => {
+  try {
+    const user = await userForResetToken(req.body?.token);
+    if (!user) return res.status(400).json({ error: RESET_LINK_INVALID });
+    res.json({ valid: true, username: user.username, email: maskEmail(user.email) });
+  } catch (err) {
+    console.error("Reset check error:", err);
+    res.status(500).json({ error: "Couldn't check the link. Please try again." });
+  }
+});
+
+// POST /api/auth/reset-password  { token, password } → sets the password and signs the user in
+router.post("/reset-password", resetPasswordLimiter, async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    const user = await userForResetToken(token);
+    if (!user) return res.status(400).json({ error: RESET_LINK_INVALID });
+    if (!isValidPassword(password)) return res.status(400).json({ error: PASSWORD_RULE_MESSAGE });
+    if (await user.comparePassword(password)) {
+      return res.status(400).json({ error: "Choose a password you haven't used for this account" });
+    }
+
+    user.password = password;
+    await user.save(); // hashes it and sets passwordChangedAt, which signs out every other session
+    sendPasswordChangedEmail(user).catch((err) => console.error("[EMAIL] Password changed notice failed:", err.message));
+
+    res.json({ message: "Your password has been changed.", token: signAuthToken(user._id), user: toPublicUser(user) });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    res.status(500).json({ error: "Couldn't reset the password. Please try again." });
   }
 });
 

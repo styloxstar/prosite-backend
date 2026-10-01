@@ -268,4 +268,63 @@ ${lineItems({
   return { subject: "Your Free Trial Order Confirmation - ProSite", html, text };
 }
 
-module.exports = { paymentReceiptEmail, trialActivationEmail, formatMoney, CURRENCY_SYMBOLS };
+/** Password reset link (sent on request; the link expires after `minutes`). */
+function passwordResetEmail(user, resetLink, minutes) {
+  const rawName = user.name || user.username || "there";
+  const name = escapeHtml(rawName);
+  const link = escapeHtml(resetLink);
+  const mins = escapeHtml(minutes);
+  const html = layout({
+    title: "Reset your ProSite password",
+    preheader: `Use this link within ${mins} minutes to choose a new password.`,
+    kicker: "Password reset",
+    accent: ["#2563EB", "#6D4AE8"],
+    footnote: "You received this because a password reset was requested for your ProSite account.",
+    body: `${greeting("Reset your password", `Hi <strong style="color:${BRAND.ink};">${name}</strong>, we received a request to reset the password for your ProSite account (<strong style="color:${BRAND.ink};">${escapeHtml(user.username)}</strong>). Click the button below to choose a new one.`)}
+${button({ href: link, label: "Choose a new password &rarr;", from: "#2563EB", to: "#6D4AE8" })}
+        <p style="margin:0 0 28px;font-size:12px;color:${BRAND.muted};text-align:center;">This link expires in ${mins} minutes and can only be used once.</p>
+${detailsPanel("Didn't ask for this?", [["Your account", "is safe: nothing changes until you pick a new password"], ["What to do", "simply ignore this e-mail"]])}
+        <p style="margin:0 0 6px;font-size:12px;color:${BRAND.muted};line-height:1.7;">Button not working? Paste this link into your browser:</p>
+        <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="${link}" style="color:#1D4ED8;">${link}</a></p>`,
+  });
+  const text = [
+    "Reset your password",
+    "",
+    `Hi ${rawName}, we received a request to reset the password for your ProSite account (${user.username}).`,
+    "",
+    `Choose a new password: ${resetLink}`,
+    `(This link expires in ${minutes} minutes and can only be used once.)`,
+    "",
+    "Didn't ask for this? Ignore this e-mail: your password stays the same.",
+  ].join("\n");
+  return { subject: "Reset your ProSite password", html, text };
+}
+
+/** Security notice after a password change (so an unexpected change doesn't go unnoticed). */
+function passwordChangedEmail(user, when = new Date()) {
+  const rawName = user.name || user.username || "there";
+  const time = new Date(when).toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC";
+  const html = layout({
+    title: "Your ProSite password was changed",
+    preheader: "Your password was just changed. If this was you, no action is needed.",
+    kicker: "Security notice",
+    accent: ["#15803D", "#166534"],
+    footnote: "This is an automated security notice. Please do not reply to this e-mail.",
+    body: `${greeting("Your password was changed", `Hi <strong style="color:${BRAND.ink};">${escapeHtml(rawName)}</strong>, the password for your ProSite account (<strong style="color:${BRAND.ink};">${escapeHtml(user.username)}</strong>) was just changed. For your security, you've been signed out on your other devices.`)}
+${detailsPanel("Change details", [["When", escapeHtml(time)], ["Account", escapeHtml(user.username)]])}
+        <p style="margin:0;font-size:13px;color:${BRAND.muted};line-height:1.7;">
+          <strong style="color:${BRAND.ink};">Wasn't you?</strong> Reset your password right away from the sign-in page ("Forgot password?") and contact us.
+        </p>`,
+  });
+  const text = [
+    "Your password was changed",
+    "",
+    `Hi ${rawName}, the password for your ProSite account (${user.username}) was changed on ${time}.`,
+    "You've been signed out on your other devices.",
+    "",
+    "Wasn't you? Reset your password right away from the sign-in page (\"Forgot password?\").",
+  ].join("\n");
+  return { subject: "Your ProSite password was changed", html, text };
+}
+
+module.exports = { paymentReceiptEmail, trialActivationEmail, passwordResetEmail, passwordChangedEmail, formatMoney, CURRENCY_SYMBOLS };
