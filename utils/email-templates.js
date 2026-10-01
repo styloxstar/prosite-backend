@@ -43,7 +43,7 @@ function detailsPanel(title, rows) {
   const body = rows.map(([label, value]) => `
           <tr>
             <td style="padding:5px 0;font-size:13px;color:${BRAND.muted};width:45%;">${label}</td>
-            <td style="padding:5px 0;font-size:13px;color:${BRAND.ink};font-weight:600;word-break:break-all;">${value}</td>
+            <td style="padding:5px 0;font-size:13px;color:${BRAND.ink};font-weight:600;word-break:break-word;overflow-wrap:anywhere;">${value}</td>
           </tr>`).join("");
   return `
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border:1px solid ${BRAND.line};border-radius:12px;margin:0 0 28px;">
