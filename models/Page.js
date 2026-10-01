@@ -23,6 +23,13 @@ const pageSchema = new mongoose.Schema({
       type: String,
     },
   ],
+  // Search / social settings used by exported sites (validated in routes/pages.js).
+  seo: {
+    title: { type: String, default: "" },
+    description: { type: String, default: "" },
+    image: { type: String, default: "" },
+    favicon: { type: String, default: "" },
+  },
   isPublished: {
     type: Boolean,
     default: false,

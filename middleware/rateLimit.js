@@ -92,6 +92,28 @@ const paymentLimiter = rateLimit({
   keyGenerator: (req) => (req.user ? `user:${req.user._id}` : clientIp(req)),
 });
 
+/** Forgot-password requests: 5 / 15 min per IP (each can send an e-mail). */
+const forgotPasswordLimiter = rateLimit({
+  windowMs: FIFTEEN_MINUTES,
+  max: 5,
+  message: "Too many reset requests. Please wait a few minutes and try again.",
+});
+
+/** …and 3 / hour per account identifier, so nobody can flood one inbox from many IPs. */
+const forgotPasswordTargetLimiter = rateLimit({
+  windowMs: ONE_HOUR,
+  max: 3,
+  message: "Too many reset requests for this account. Please try again later.",
+  keyGenerator: (req) => `reset:${String(req.body?.identifier ?? "").trim().toLowerCase().slice(0, 254)}`,
+});
+
+/** Setting a new password with a reset link: 10 / 15 min per IP (slows token guessing). */
+const resetPasswordLimiter = rateLimit({
+  windowMs: FIFTEEN_MINUTES,
+  max: 10,
+  message: "Too many attempts. Please wait a few minutes and try again.",
+});
+
 /** Generic API ceiling: 1000 requests / 15 min per IP (high enough for builder autosave). */
 const apiLimiter = rateLimit({
   windowMs: FIFTEEN_MINUTES,
@@ -99,4 +121,7 @@ const apiLimiter = rateLimit({
   message: "Too many requests. Please slow down.",
 });
 
-module.exports = { rateLimit, loginLimiter, registerLimiter, emailLimiter, paymentLimiter, apiLimiter };
+module.exports = {
+  rateLimit, loginLimiter, registerLimiter, emailLimiter, paymentLimiter, apiLimiter,
+  forgotPasswordLimiter, forgotPasswordTargetLimiter, resetPasswordLimiter,
+};
